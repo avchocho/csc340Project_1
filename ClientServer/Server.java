@@ -6,7 +6,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import ClientServer.*;
 
-
 public class Server extends Node {
     private DatagramSocket socket;
     private ExecutorService executorService;
@@ -16,16 +15,26 @@ public class Server extends Node {
     private ConcurrentHashMap<String, Protocol> clientData; // Active client data (heartbeat + files)
     private ConcurrentHashMap<String, InetSocketAddress> clientAddresses; // Client IPs & Ports
 
-    public Server() {
-        super("server", "127.0.0.1", 5000, ""); // Initialize Node with server details
-
+    public Server(String configFile) {
         try {
             System.out.println("Server is starting...");
 
-            // Load configuration
-            ConfigReader config = new ConfigReader("ClientServer/server_config.properties");
+            // Read config file manually 
+            Properties config = new Properties();
+            try (FileInputStream input = new FileInputStream(configFile)) {
+                config.load(input);
+            } catch (FileNotFoundException e) {
+                System.err.println("ERROR: server_config.properties not found in expected location: " + configFile);
+                System.exit(1);
+            } catch (IOException e) {
+                System.err.println("ERROR: Could not read server_config.properties.");
+                e.printStackTrace();
+                System.exit(1);
+            }
+
+            // Set Node attributes
             setIpAddress(config.getProperty("server_ip", "127.0.0.1"));
-            setPort(config.getIntProperty("server_port", 5000));
+            setPort(Integer.parseInt(config.getProperty("server_port", "5000")));
 
             // Bind socket to server IP and port
             InetAddress serverAddress = InetAddress.getByName(getIpAddress());
@@ -47,6 +56,7 @@ public class Server extends Node {
             e.printStackTrace();
         }
     }
+
 
     /**
      * Thread 1: Listens for incoming heartbeats from clients.
@@ -123,39 +133,69 @@ public class Server extends Node {
         while (true) {
             try {
                 Thread.sleep(30000); // Send updates every 30 seconds
-
-                if (clientData.isEmpty()) {
-                    System.out.println("[Server] No active clients to broadcast updates.");
+    
+                if (clientData.isEmpty() && clientAddresses.isEmpty()) {
+                    System.out.println("[Server] No clients to broadcast updates.");
                     continue;
                 }
-
-                // Build a message containing active clients & their files
-                StringBuilder combinedPayload = new StringBuilder();
+    
+                List<String> inactiveNodes = new ArrayList<>();
+                long currentTime = System.currentTimeMillis();
+    
+                // Identify inactive clients
+                Iterator<Map.Entry<String, Protocol>> iterator = clientData.entrySet().iterator();
+                while (iterator.hasNext()) {
+                    Map.Entry<String, Protocol> entry = iterator.next();
+                    String nodeId = entry.getKey();
+                    long lastUpdate = entry.getValue().getTimestamp();
+    
+                    if (currentTime - lastUpdate > TIMEOUT) {
+                        System.out.println("[Server] Node " + nodeId + " is now inactive.");
+                        inactiveNodes.add(nodeId);
+                        iterator.remove(); // Remove inactive client
+                        clientAddresses.remove(nodeId);
+                    }
+                }
+    
+                // Build message containing both active and inactive nodes
+                StringBuilder updatePayload = new StringBuilder();
+    
+                // Add active nodes
                 for (Map.Entry<String, Protocol> entry : clientData.entrySet()) {
                     String nodeId = entry.getKey();
                     String fileList = entry.getValue().getPayload();
-                    combinedPayload.append(nodeId).append("::").append(fileList).append("\n");
+                    updatePayload.append("Node (").append(nodeId).append("): active, Files: [")
+                            .append(fileList).append("]\n");
                 }
-
-                // Create a Protocol object containing all updates
-                Protocol combinedUpdate = new Protocol(1, false, "server", System.currentTimeMillis(), 0, combinedPayload.toString());
+    
+                // Add inactive nodes
+                for (String nodeId : inactiveNodes) {
+                    updatePayload.append("Node (").append(nodeId).append("): inactive\n");
+                }
+    
+                // Create a single update packet
+                Protocol combinedUpdate = new Protocol(1, false, "server", System.currentTimeMillis(), 0, updatePayload.toString());
                 byte[] data = combinedUpdate.serialize();
-
+    
                 // Send ONE packet to each active client
                 for (InetSocketAddress clientAddress : clientAddresses.values()) {
                     DatagramPacket packet = new DatagramPacket(data, data.length,
                             clientAddress.getAddress(), clientAddress.getPort());
                     socket.send(packet);
                 }
-
-                System.out.println("[Server] Sent updated client availability.");
+    
+                System.out.println("[Server] Sent updated network status.");
+    
             } catch (IOException | InterruptedException e) {
                 e.printStackTrace();
             }
         }
     }
-
     public static void main(String[] args) {
-        new Server();
+        if (args.length < 1) {
+            System.err.println("Usage: java -jar Server.jar <config_file>");
+            System.exit(1);
+        }
+        new Server(args[0]); //args[0]
     }
 }

@@ -4,39 +4,49 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
-import ClientServer.*;  
+import ClientServer.*;
 
-public class Client extends Node { 
+public class Client extends Node {
     private String serverIP;
     private int serverPort;
     private DatagramSocket socket;
     private ExecutorService executorService;
     private volatile String lastServerUpdate = "Waiting for updates...";
 
-    public Client() {
+    public Client(String configFile) {
         try {
-            System.out.println("Client is starting...");
+            System.out.println("Client is starting with config: " + configFile);
 
-            // Load config file using ConfigReader
-            ConfigReader config = new ConfigReader("ClientServer/client_config.properties");
+            // Load configuration manually
+            Properties properties = new Properties();
+            try (FileInputStream fis = new FileInputStream(configFile)) {
+                properties.load(fis);
+            } catch (FileNotFoundException e) {
+                System.err.println("ERROR: Configuration file not found: " + configFile);
+                System.exit(1);
+            } catch (IOException e) {
+                System.err.println("ERROR: Could not read the configuration file.");
+                e.printStackTrace();
+                System.exit(1);
+            }
 
-            // Set Node attributes using inherited setters
-            setIpAddress(config.getProperty("client_ip", InetAddress.getLocalHost().getHostAddress())); // Get actual IP
-            setNodeId(getIpAddress()); // Node ID is now the IP address
-            setPort(config.getIntProperty("client_port", 6001));
-            setHomeDirectory(config.getProperty("home_directory", "./home/"));
+            // Set Node attributes
+            setIpAddress(properties.getProperty("client_ip", InetAddress.getLocalHost().getHostAddress()));
+            setNodeId(getIpAddress());
+            setPort(Integer.parseInt(properties.getProperty("client_port", "6001")));
+            setHomeDirectory(properties.getProperty("home_directory", "./home/"));
 
-            // Read server details from config
-            serverIP = config.getProperty("server_ip", "127.0.0.1");
-            serverPort = config.getIntProperty("server_port", 5000);
+            // Read server details
+            serverIP = properties.getProperty("server_ip", "127.0.0.1");
+            serverPort = Integer.parseInt(properties.getProperty("server_port", "5000"));
 
             // Create socket for communication
             socket = new DatagramSocket(getPort(), InetAddress.getByName(getIpAddress()));
             executorService = Executors.newCachedThreadPool();
 
             System.out.println("Client " + getIpAddress() + " running at " +
-                getIpAddress() + ":" + getPort() +
-                " -> Server " + serverIP + ":" + serverPort);
+                    getIpAddress() + ":" + getPort() +
+                    " -> Server " + serverIP + ":" + serverPort);
 
             // Start threads for communication
             executorService.execute(this::sendHeartbeat);
@@ -136,7 +146,14 @@ public class Client extends Node {
         return fileList.length() > 0 ? fileList.toString() : "No files available.";
     }
 
+    /**
+     * Main method: Reads config file name from the command line argument.
+     */
     public static void main(String[] args) {
-        new Client();
+        if (args.length < 1) {
+            System.err.println("Usage: java -jar Client.jar <config_file>");
+            System.exit(1);
+        }
+        new Client(args[0]);
     }
 }
