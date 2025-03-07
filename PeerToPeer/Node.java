@@ -1,4 +1,6 @@
-package ClientServer;
+package PeerToPeer;
+import PeerToPeer.*;
+
 
 public class Node {
     private int port;

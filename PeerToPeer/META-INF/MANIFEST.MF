@@ -1,4 +1,4 @@
 Manifest-Version: 1.0
-Main-Class: ClientServer.Server
+Main-Class: PeerToPeer.Peer
 Created-By: 21.0.2 (Oracle Corporation)
 
